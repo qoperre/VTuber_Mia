@@ -1,4 +1,5 @@
 ﻿using System.IO;
+using System.Text;
 using UnityEditor;
 
 namespace Live2D.Cubism.Editor
@@ -15,7 +16,7 @@ namespace Live2D.Cubism.Editor
             var activeObject = Selection.activeObject;
             var currentDirectoryPath = ((activeObject == null)
                 ? "Assets"
-                : AssetDatabase.GetAssetPath(activeObject.GetInstanceID()));
+                : AssetDatabase.GetAssetPath(activeObject));
 
             if (string.IsNullOrEmpty(currentDirectoryPath))
             {
@@ -27,6 +28,32 @@ namespace Live2D.Cubism.Editor
             }
 
             return currentDirectoryPath;
+        }
+
+        /// <summary>
+        /// Deterministically derives a 32-bit id from <paramref name="key"/>.
+        /// Used where a stable, session-independent stand-in for Object.GetInstanceID() is needed:
+        /// CubismFadeMotionList.MotionInstanceIds is a serialized int[] and is matched against
+        /// AnimationEvent.intParameter (a fixed int field), neither of which can hold the 64-bit
+        /// EntityId that replaced GetInstanceID().
+        /// </summary>
+        /// <param name="key">A value that uniquely identifies the motion, e.g. its asset path.</param>
+        /// <returns>A deterministic 32-bit id.</returns>
+        public static int GetStableId(string key)
+        {
+            unchecked
+            {
+                const uint offsetBasis = 2166136261;
+                const uint prime = 16777619;
+
+                var hash = offsetBasis;
+                foreach (var b in Encoding.UTF8.GetBytes(key))
+                {
+                    hash = (hash ^ b) * prime;
+                }
+
+                return (int)hash;
+            }
         }
     }
 }
