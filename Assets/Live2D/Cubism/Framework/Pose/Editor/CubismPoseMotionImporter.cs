@@ -7,6 +7,7 @@
 
 
 using Live2D.Cubism.Core;
+using Live2D.Cubism.Editor;
 using Live2D.Cubism.Framework.Json;
 using Live2D.Cubism.Framework.MotionFade;
 using Live2D.Cubism.Framework.Pose;
@@ -115,7 +116,7 @@ namespace Live2D.Cubism.Editor.Importers
                 // Add animation event
                 if (animationClip != null)
                 {
-                    var instanceId = animationClip.GetInstanceID();
+                    var instanceId = CubismUnityEditorUtility.GetStableId(animationClipPath);
 
                     var sourceAnimationEvents = AnimationUtility.GetAnimationEvents(animationClip);
                     var index = -1;
@@ -236,7 +237,7 @@ namespace Live2D.Cubism.Editor.Importers
 
                     if (!isExistInstanceId)
                     {
-                        instanceId = animationClip.GetInstanceID();
+                        instanceId = CubismUnityEditorUtility.GetStableId(animationClipPath);
                     }
 
                     fadeMotions.MotionInstanceIds[motionIndex] = instanceId;
@@ -244,7 +245,7 @@ namespace Live2D.Cubism.Editor.Importers
                 }
                 else
                 {
-                    var instanceId = animationClip.GetInstanceID();
+                    var instanceId = CubismUnityEditorUtility.GetStableId(animationClipPath);
                     motionIndex = fadeMotions.MotionInstanceIds.Length;
 
                     Array.Resize(ref fadeMotions.MotionInstanceIds, motionIndex + 1);
