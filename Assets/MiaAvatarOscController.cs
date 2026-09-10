@@ -13,14 +13,11 @@ using uOSC;
 ///
 /// 수신 주소 스킴:
 ///   /mia/param/&lt;ParamID&gt;    float    — 연속 파라미터 절대값(스무딩 적용, 예: ParamAngleX)
-///   /mia/expr/&lt;ExprID&gt;      0|1      — 표현 토글(즉시 적용, 예: Hat_OnOff, IsCry, IsAngry)
+///   /mia/expr/&lt;ParamID&gt;     30|0     — 표현 토글(즉시 적용, 예: Param71=Hat_OnOff, Param68=IsCry)
 ///   /mia/trigger/&lt;name&gt;     (무시)   — 순간 제스처 코루틴 재생(nod/shake_head/wink_left/wink_right)
 ///
-/// 주의: ParamID/ExprID 문자열은 이 프로젝트 Mia 모델의 실제 Cubism 파라미터와 정확히 일치해야
-/// 합니다. mia/avatar/avatar_actions.py 의 PARAM_ID/EXPR_ID 는 최선 추정치(일부는
-/// MeowFaceLive2DController.cs 에서 이미 확인된 값)이므로, 모델에 없는 ID가 오면 콘솔에 경고만
-/// 남기고 무시합니다(WarnUnknown) — Inspector에서 Cubism 모델의 실제 파라미터 목록을 확인해
-/// avatar_actions.py 쪽을 맞춰 고치세요.
+/// ParamID는 mia/avatar/avatar_actions.py의 PARAM_ID/EXPR_ID와 일치해야 하며,
+/// 모델에 없는 ID는 WarnUnknown으로 한 번만 경고하고 무시합니다.
 /// </summary>
 [RequireComponent(typeof(uOscServer))]
 public class MiaAvatarOscController : MonoBehaviour
@@ -53,40 +50,28 @@ public class MiaAvatarOscController : MonoBehaviour
     void Awake()
     {
         server = GetComponent<uOscServer>();
-    }
-
-    void Start()
-    {
         CacheParameters();
     }
 
     void OnEnable()
     {
-        if (server == null) server = GetComponent<uOscServer>();
-        if (server != null) server.onDataReceived.AddListener(OnDataReceived);
+        server.onDataReceived.AddListener(OnDataReceived);
     }
 
     void OnDisable()
     {
-        if (server != null) server.onDataReceived.RemoveListener(OnDataReceived);
+        server.onDataReceived.RemoveListener(OnDataReceived);
     }
 
     void Update()
     {
         if (targets.Count == 0) return;
 
+        float t = smoothing > 0f ? 1f - Mathf.Pow(smoothing, Time.deltaTime * 60f) : 1f;
         foreach (var kv in targets)
         {
             if (!paramsById.TryGetValue(kv.Key, out var p)) continue;
-            if (smoothing > 0f)
-            {
-                float t = 1f - Mathf.Pow(smoothing, Time.deltaTime * 60f);
-                p.Value = Mathf.Lerp(p.Value, kv.Value, t);
-            }
-            else
-            {
-                p.Value = kv.Value;
-            }
+            p.Value = Mathf.Lerp(p.Value, kv.Value, t);
         }
     }
 
@@ -115,24 +100,24 @@ public class MiaAvatarOscController : MonoBehaviour
     }
 
     // ======================= OSC 수신 =======================
-    // uOscServer.onDataReceived 는 uOscServer.Update()(메인 스레드)에서 Invoke 되므로
-    // 여기서 Cubism 파라미터에 바로 접근해도 안전합니다(MeowFaceLive2DController.cs 와 달리
-    // 별도 스레드 동기화가 필요 없음).
+    // uOscServer.onDataReceived는 메인 스레드에서 호출된다.
 
     public void OnDataReceived(Message message)
     {
         var addr = message.address;
         if (string.IsNullOrEmpty(addr) || message.values == null || message.values.Length == 0) return;
+        float value = ToFloat(message.values[0]);
+        if (float.IsNaN(value) || float.IsInfinity(value)) return;
 
         if (addr.StartsWith("/mia/param/"))
         {
             string id = addr.Substring("/mia/param/".Length);
-            SetParamTarget(id, ToFloat(message.values[0]));
+            Set(id, value, immediate: false);
         }
         else if (addr.StartsWith("/mia/expr/"))
         {
             string id = addr.Substring("/mia/expr/".Length);
-            ApplyExprImmediate(id, ToFloat(message.values[0]));
+            Set(id, value, immediate: true);
         }
         else if (addr.StartsWith("/mia/trigger/"))
         {
@@ -151,7 +136,6 @@ public class MiaAvatarOscController : MonoBehaviour
         {
             case float f: return f;
             case int i: return i;
-            case double d: return (float)d;
             case bool b: return b ? 1f : 0f;
             default:
                 float.TryParse(v?.ToString(), out var parsed);
@@ -159,25 +143,19 @@ public class MiaAvatarOscController : MonoBehaviour
         }
     }
 
-    void SetParamTarget(string id, float value)
-    {
-        if (!paramsById.ContainsKey(id))
-        {
-            WarnUnknown(id);
-            return;
-        }
-        targets[id] = value;
-    }
-
-    void ApplyExprImmediate(string id, float value)
+    void Set(string id, float value, bool immediate)
     {
         if (!paramsById.TryGetValue(id, out var p))
         {
             WarnUnknown(id);
             return;
         }
-        p.Value = value;
-        targets.Remove(id); // Update() 스무딩 루프가 다시 덮어쓰지 않도록
+        if (immediate)
+        {
+            p.Value = value;
+            targets.Remove(id);
+        }
+        else targets[id] = value;
     }
 
     void WarnUnknown(string id)
@@ -197,63 +175,33 @@ public class MiaAvatarOscController : MonoBehaviour
     {
         switch (name)
         {
-            case "nod": StartCoroutine(GestureNod()); break;
-            case "shake_head": StartCoroutine(GestureShake()); break;
-            case "wink_left": StartCoroutine(GestureWink(true)); break;
-            case "wink_right": StartCoroutine(GestureWink(false)); break;
+            case "nod": StartCoroutine(Gesture("ParamAngleY", 0.6f,
+                (b, p) => b - nodAngle * Mathf.Sin(p * Mathf.PI * 2f) * (1f - p))); break;
+            case "shake_head": StartCoroutine(Gesture("ParamAngleX", 0.6f,
+                (b, p) => b + shakeAngle * Mathf.Sin(p * Mathf.PI * 3f) * (1f - p))); break;
+            case "wink_left": StartCoroutine(Gesture("ParamEyeLOpen", 0.4f, Wink)); break;
+            case "wink_right": StartCoroutine(Gesture("ParamEyeROpen", 0.4f, Wink)); break;
             default:
                 if (debugLog) Debug.LogWarning($"[MiaAvatarOsc] 알 수 없는 트리거: {name}");
                 break;
         }
     }
 
-    IEnumerator GestureNod()
+    IEnumerator Gesture(string id, float duration, System.Func<float, float, float> valueAt)
     {
-        if (!paramsById.TryGetValue("ParamAngleY", out var p)) yield break;
-        float baseVal = p.Value;
-        const float duration = 0.6f;
-        float t = 0f;
-        while (t < duration)
-        {
-            t += Time.deltaTime;
-            float phase = Mathf.Clamp01(t / duration);
-            p.Value = baseVal - nodAngle * Mathf.Sin(phase * Mathf.PI * 2f) * (1f - phase);
-            yield return null;
-        }
-        p.Value = baseVal;
-    }
-
-    IEnumerator GestureShake()
-    {
-        if (!paramsById.TryGetValue("ParamAngleX", out var p)) yield break;
-        float baseVal = p.Value;
-        const float duration = 0.6f;
-        float t = 0f;
-        while (t < duration)
-        {
-            t += Time.deltaTime;
-            float phase = Mathf.Clamp01(t / duration);
-            p.Value = baseVal + shakeAngle * Mathf.Sin(phase * Mathf.PI * 3f) * (1f - phase);
-            yield return null;
-        }
-        p.Value = baseVal;
-    }
-
-    IEnumerator GestureWink(bool left)
-    {
-        string id = left ? "ParamEyeLOpen" : "ParamEyeROpen";
         if (!paramsById.TryGetValue(id, out var p)) yield break;
         float baseVal = p.Value;
-        const float duration = 0.4f;
         float t = 0f;
         while (t < duration)
         {
             t += Time.deltaTime;
-            float phase = Mathf.Clamp01(t / duration);           // 0..1
-            float closeAmt = phase < 0.5f ? phase * 2f : (1f - phase) * 2f; // 감았다 뜨기
-            p.Value = Mathf.Lerp(baseVal, 0f, closeAmt);
+            float phase = Mathf.Clamp01(t / duration);
+            p.Value = valueAt(baseVal, phase);
             yield return null;
         }
         p.Value = baseVal;
     }
+
+    static float Wink(float baseValue, float phase) => Mathf.Lerp(
+        baseValue, 0f, phase < 0.5f ? phase * 2f : (1f - phase) * 2f);
 }

@@ -56,5 +56,5 @@
         "temp/": true,
         "Temp/": true
     },
-    "dotnet.defaultSolution": "Mia_VTuber.sln"
+    "dotnet.defaultSolution": "VTuber_Mia.sln"
 }
